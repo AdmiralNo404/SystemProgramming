@@ -1,0 +1,681 @@
+/***********************************************************************************************
+ CSci 4061 Spring 2013
+ Assignment# 5: TCP/IP Programming and Multithreaded applications
+
+ Student name: Xiaobin Lin
+ Student ID:   4508516
+
+ Student name: Yanbang Liu  
+ Student ID:   4446044  
+
+ X500 id: linxx966, liux1366
+
+ Operating system on which you tested your code: Linux, Unix, Solaris, MacOS
+ CSELABS machine: <machine you tested on eg: xyz.cselabs.umn.edu>
+
+ GROUP INSTRUCTION: Please make ONLY one submission when working in a group.
+***********************************************************************************************/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/time.h>
+#include <pthread.h>
+
+#define LOGNAME	"LOGFILE"
+#define PORT "6789"  	// the port users will be connecting to
+#define BACKLOG 10      // how many pending connections queue will hold
+#define BUFSIZE 1024
+#define ARGLEN	256
+
+
+char config[ARGLEN];
+
+pthread_mutex_t fMutex;	
+
+typedef struct{
+	int fd;
+	struct sockaddr_storage addr;
+}thread_input;
+
+
+void get_time(char *buffer, int size);
+void startConnection(struct sockaddr_storage addr);
+void endConnection(struct sockaddr_storage addr);
+int getFileName(char* quote,char* fname);
+int getQuote(char* fname, char* result, int* lastline);
+int getList(char* param);
+int getLineNum(char* fname);
+int getQuoteLine(char* quote);
+
+// get sockaddr, IPv4 or IPv6:
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+
+// Gets the current time in a convient format
+// Adapted from timeinfo.c
+void get_time(char *buffer, int size)
+{
+	time_t  clocktime;
+	struct tm  *timeinfo;
+
+	time (&clocktime);
+	timeinfo = localtime( &clocktime );
+	strftime(buffer, size, "%b-%d-%Y-%H-%M-%S", timeinfo); 
+}
+
+
+int getLineNum(char* fname)
+{
+	int count = 0;
+	FILE *fp;
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+
+	fp = fopen(fname, "r");
+	if (fp == NULL)
+	{
+	   printf("Can't open file!\n");	
+	   return -1;
+	}
+
+	while ((read = getline(&line, &len, fp)) != -1) {
+		count++;
+	}
+	free(line);
+
+
+	//printf("count: %d\n",count);
+	fclose(fp);
+	return count;
+}
+
+int getQuoteLine(char* quote)
+{
+	int count = 0;
+	FILE *fp;
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	char* ptr;
+
+	fp = fopen(config, "r");
+	if (fp == NULL)
+	{
+	   printf("Can't open file!\n");
+	   return -1;
+	}
+	while ((read = getline(&line, &len, fp)) != -1) 
+	{
+		//if we found the quote
+		if(strstr(line,quote) != NULL)
+		{
+			break;
+		}
+		count++;
+	}
+	free(line);
+	fclose(fp);
+
+	//printf("%s  %d",quote,count);
+	return count;
+}
+
+void startConnection(struct sockaddr_storage addr)
+{
+	char ip[INET6_ADDRSTRLEN];
+	char out[ARGLEN];
+	char now[ARGLEN];
+
+	FILE *fp;
+	strcpy(out,"Connection Opened: ");
+	get_time(now,ARGLEN);
+	strcat(out,now);
+	strcat(out,": ");
+
+	inet_ntop(addr.ss_family,
+		     get_in_addr((struct sockaddr *)&addr),
+		     ip, sizeof ip);
+
+	strcat(out,ip);	
+	
+	pthread_mutex_lock(&fMutex);
+	//assume no other thread will modify PWD
+	if( (fp = fopen(LOGNAME,"a")) == NULL)
+	{
+		pthread_mutex_unlock(&fMutex);
+		perror("fail to open file");
+		return 0;
+	}
+	else
+	{
+		fprintf(fp,"%s\n",out);
+		fclose(fp);
+		pthread_mutex_unlock(&fMutex);
+	}
+}
+
+void endConnection(struct sockaddr_storage addr)
+{
+	char ip[INET6_ADDRSTRLEN];
+	char out[ARGLEN];
+	char now[ARGLEN];
+	FILE *fp;
+
+	strcpy(out,"Connection Closed: ");
+	get_time(now,ARGLEN);
+	strcat(out,now);
+	strcat(out,": ");
+	
+	inet_ntop(addr.ss_family,
+		     get_in_addr((struct sockaddr *)&addr),
+		     ip, sizeof ip);
+
+	strcat(out,ip);	
+	
+	pthread_mutex_lock(&fMutex);
+	//assume no other thread will modify PWD
+	if( (fp = fopen(LOGNAME,"a")) == NULL)
+	{
+		pthread_mutex_unlock(&fMutex);
+		perror("fail to open file");
+		return 0;
+	}
+	else
+	{
+		fprintf(fp,"%s\n",out);
+		fclose(fp);
+		pthread_mutex_unlock(&fMutex);
+	}
+}
+
+
+int getList(char* param)
+{
+    FILE *fp;
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	char temp[ARGLEN];
+	char* ptr;
+	char* saveptr;
+
+	strcpy(temp,"");
+	strcpy(param,"");
+	
+	fp = fopen(config, "r");
+	if (fp == NULL)
+	{
+		return 0;
+	}
+
+	while ((read = getline(&line, &len, fp)) != -1) 
+	{
+		ptr = strtok_r(line,":",&saveptr);
+		strcpy(temp,ptr);
+		strcat(param,temp);	
+		strcat(param,"\n");
+	}
+
+
+	//printf("List: %s\n",param);
+	free(line);
+	return 1;
+
+}
+
+
+int getFileName(char* quote,char* fname)
+{
+	FILE* fp;	        
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	char* ptr;
+	char* saveptr;
+	int linenum = 0;
+
+
+	//assume no other thread will modify PWD
+	if( (fp = fopen(config,"r")) == NULL)
+	{
+		perror("fail to open file");
+		return 0;
+	}
+	else
+	{
+		//process line by line
+		while ((read = getline(&line, &len, fp)) != -1) 
+		{
+			//printf("Retrieved line of length %zu :\n", read);
+			//printf("%s", line);
+
+
+			//this means we will randomly return a file name
+			if(quote == NULL)
+			{
+				//we will first count the number of lines
+				linenum++;
+			}
+			//this means we will look for file name of given quote
+			else
+			{
+				//if we found the quote
+				if(strstr(line,quote) != NULL)
+				{
+					ptr = strtok_r(line,": ",&saveptr);
+					ptr = strtok_r(NULL,": ",&saveptr);
+					strcpy(fname, ptr);
+					fname[strlen(fname) - 1] = '\0';
+					free(line);
+					fclose(fp);
+					return 1;
+				}
+
+			}
+
+		}//while
+	
+		if(quote == NULL)
+		{
+			int linecount = 0;
+			int seed = time(NULL);
+			int target = rand_r(&seed) % linenum;
+
+			//printf("linenum:%d\n",linenum);
+			//printf("Target:%d\n",target);
+
+			rewind(fp);
+			while ((read = getline(&line, &len, fp)) != -1) 
+			{
+				if(linecount == target)
+				{
+					ptr = strtok_r(line,": ",&saveptr);
+					ptr = strtok_r(NULL,": ",&saveptr);
+					strcpy(fname, ptr);
+					fname[strlen(fname) - 1] = '\0';
+					break;
+				}
+				linecount++;
+           	}
+           free(line);
+		}
+		else
+		{
+			free(line);
+			//cannot find the file name	
+			if(read == -1)
+			{
+				fclose(fp);
+				return 0;		
+			}
+
+		}//else quote is null
+
+		fclose(fp);
+		return 1;
+	}//else fopen
+}
+
+int getQuote(char* fname, char* result,int* lastline)
+{
+	FILE* fp;	        
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t read;
+	char* ptr;
+	char* saveptr;
+	int linenum = 0;
+
+	//assume no other thread will modify PWD
+	if( (fp = fopen(fname,"r")) == NULL)
+	{
+		perror("fail to open file");
+		return 0;
+	}
+	else
+	{
+		//process line by line
+		while ((read = getline(&line, &len, fp)) != -1) 
+		{		
+			//we will first count the number of lines
+			linenum++;
+		}
+
+		int linecount = 0;
+		int target = *lastline;
+
+		//printf("linenum:%d\n",linenum);
+		//printf("Target:%d\n",target);
+		rewind(fp);
+		while ((read = getline(&line, &len, fp)) != -1) 
+		{
+			if(linecount == target)
+			{
+				strcpy(result, line);
+				result[strlen(result) - 1] = '\0';
+				getline(&line, &len, fp);
+				strcat(result,line);
+				break;
+			}
+			linecount++;
+       	}
+       	free(line);
+
+		*lastline+=2;
+		if(*lastline>= linenum)
+		{
+			*lastline = 0;
+		}
+		
+		fclose(fp);
+		return 1;
+	}//else fopen	
+
+}
+
+
+void *quote_handler(void* param)
+{
+	char buf[BUFSIZE];
+	int rv;
+	char argv[2][ARGLEN];
+	char* ptr;
+	char* saveptr;
+	char fname[ARGLEN];
+	char out[ARGLEN];
+	int run = 1;
+	fd_set fdin;
+	struct sockaddr_storage addr;
+	int fd; 
+	int num_files = getLineNum(config);
+	int counter[num_files];
+
+	//printf("Files: %d\n",num_files);
+	memset(counter,0,num_files);
+
+	{
+		fd = ((thread_input*)param)->fd;
+		addr = ((thread_input*)param)->addr;
+		free((thread_input*)param);
+	}	
+
+	pthread_t mytid = pthread_self();
+	startConnection(addr);
+	while(run)
+	{
+		//printf("Tid: %d\nFD: %d\n", mytid,fd);
+        //FD_ZERO( &fdin );
+        //FD_SET(fd, &fdin);
+		//select(32, (fd_set *)&fdin, 0, 0, NULL);
+
+		rv = read(fd,buf,BUFSIZE);
+		if(rv == -1)
+		{
+			perror("read");
+			strcpy(out,"Sorry, I don't understand what you are asking.\n");
+			if (send(fd, out, strlen(out), 0) == -1)
+			{ 
+				perror("out");
+				run = 0;
+			}
+
+			continue;
+		}
+		buf[rv] = 0;
+		//printf("%s\n",buf);
+		//client terminated, finish quoting
+		if(strcmp("BYE\n", buf) == 0)
+		{
+			endConnection(addr);
+			run = 0;
+			continue;
+		}
+	
+		//need the reentrant version, thread save
+		ptr = strtok_r(buf," ", &saveptr);
+		//unknown input, finish quoting
+		if(strcmp("GET:", ptr) != 0)
+		{
+			strcpy(out,"Sorry, I don't understand what you are asking.\n");
+			if (send(fd, out, strlen(out), 0) == -1)
+			{ 
+				perror("out");
+			}
+			continue;
+		}
+
+		ptr = strtok_r(NULL, " ", &saveptr);
+		//printf("%s\n",ptr);
+
+		//check what should we do
+		//quote
+		if(strcmp("QUOTE", ptr) == 0)
+		{
+
+			ptr = strtok_r(NULL, " ", &saveptr);
+			//printf("%s\n",ptr);
+
+			//unknown input	
+			if(strcmp("CAT:", ptr) != 0)
+			{
+				strcpy(out,"Sorry, I don't understand what you are asking.\n");
+				if (send(fd, out, strlen(out), 0) == -1)
+				{ 
+					perror("out");
+				}
+				continue;
+			}
+			//now we have the name of the file to quote
+			else
+			{
+				ptr = strtok_r(NULL, " ", &saveptr);
+				//any
+				if(strcmp("ANY\n",ptr) == 0)
+				{
+					getFileName(NULL,fname);
+					int index = getQuoteLine(fname);
+					getQuote(fname,out,	counter + index);
+					//printf("File:%s\n",fname);		
+					//printf("out:\n%s\n",out);		
+				}
+				else
+				{
+					char name[ARGLEN];
+					//don't need the '\n' at the end
+					strcpy(name,ptr);
+					name[strlen(name) - 1] = '\0';
+	
+					//found the name
+					if(getFileName(name,fname) == 1)
+					{
+						int index = getQuoteLine(fname);
+						getQuote(fname,out,	counter + index);
+						//printf("File:%s\n",fname);
+						//printf("out:\n%s\n",out);
+					}
+					//can't find the file name
+					else
+					{
+						strcpy(out,"Sorry, I cannot find the quote!\n");
+					}
+				}
+
+			}
+
+		}
+		//list 
+		else if(strcmp("LIST\n", ptr) == 0)
+		{
+			getList(out);
+		}
+		//unknown input
+		else
+		{
+			strcpy(out,"Sorry, I don't understand what you are asking.\n");
+			continue;
+		}
+
+		if (send(fd, out, strlen(out), 0) == -1)
+		{ 
+			perror("out");
+		}
+		//printf("Tid: %d\nFD: %d\n", mytid,fd);
+	}//while
+	
+	close(fd);
+	pthread_exit(NULL);
+}
+
+
+int main(int argc, char** argv)
+{
+    int sockfd, new_fd;  // listen on sock_fd, new connection on new_fd
+    struct addrinfo hints, *servinfo, *p;
+    struct sockaddr_storage their_addr; // connector's address information
+    socklen_t sin_size;
+    struct sigaction sa;
+    int yes=1;
+    char s[INET6_ADDRSTRLEN];
+    int rv;
+
+
+
+	/***************** check input *********************/
+	if(argc!=2)
+	{
+		printf("Usage: %s <config_file_name>\n",argv[0]);
+		exit(1);
+	}
+	
+	strcpy(config,argv[1]);
+	FILE* myfp = fopen(config,"r");
+
+	if(myfp == NULL)
+	{
+		printf("File doesn't exist!\n");
+		exit(1);
+	}
+	fclose(myfp);
+	/***************** check input *********************/
+
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE; // use my IP
+
+	/*********************** Create a New Socket *******************/
+	if ((rv = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		return 1;
+	}
+
+	// loop through all the results and bind to the first we can
+	for(p = servinfo; p != NULL; p = p->ai_next) 
+	{
+		if ((sockfd = socket(p->ai_family, p->ai_socktype,
+			    p->ai_protocol)) == -1) 
+		{
+			perror("server: socket");
+			continue;
+		}
+
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes,
+			    sizeof(int)) == -1) 
+		{
+			perror("setsockopt");
+			exit(1);
+		}
+
+		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) 
+		{
+			close(sockfd);
+			perror("server: bind");
+			continue;
+		}
+
+		break;
+	}
+
+	if (p == NULL)  
+	{
+		fprintf(stderr, "server: failed to bind\n");
+		exit(2);
+	}
+
+	freeaddrinfo(servinfo); // all done with this structure
+
+	if (listen(sockfd, BACKLOG) == -1) 
+	{
+		perror("listen");
+		exit(1);
+	}
+	/*********************** Create a New Socket *******************/
+
+
+	/*********************************************/
+	if(pthread_mutex_init(&fMutex,NULL) < 0)
+	{
+		perror("pthread_mutex_init");
+		exit(1);
+	}
+
+	/*********************************************/
+
+
+
+	// main accept() loop
+    while(1) 
+	{  
+		sin_size = sizeof their_addr;
+		pthread_t tid;
+
+		printf("server: waiting for connections...\n");
+		new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+
+		if (new_fd == -1) 
+		{
+		 perror("accept");
+		 continue;
+		}
+		//printf("New FD: %d",new_fd);
+
+		inet_ntop(their_addr.ss_family,
+		 	get_in_addr((struct sockaddr *)&their_addr),
+		 	s, sizeof s);
+		printf("server: got connection from %s\n", s);
+
+		thread_input* tin = malloc(sizeof(thread_input));
+		tin->fd = new_fd;
+		tin->addr =  their_addr;
+		pthread_create(&tid,NULL,quote_handler, tin);
+    }
+
+    return 0;
+}
+
+
+
+
+
+
+

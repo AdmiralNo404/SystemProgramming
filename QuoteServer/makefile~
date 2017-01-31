@@ -1,0 +1,16 @@
+#the C compiler
+CC = gcc
+CFLAGS = -g
+
+# this rule is to link the object code into an executable
+server: quote_server.o
+	$(CC) -o showdir quote_server.o -lpthread
+
+# these rules compile any recently modified file
+quote_server.o: quote_server.c
+	$(CC) $(CFLAGS) -c quote_server.c
+
+# cleans out the .o files and executable
+clean:
+	rm -f *.o
+	rm -f server

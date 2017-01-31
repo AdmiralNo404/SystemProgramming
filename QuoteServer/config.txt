@@ -1,0 +1,5 @@
+Einstein: einstein.txt
+Twain: twain.txt
+Computers: computers.txt
+CS: cs.txt
+Liu: liu.txt

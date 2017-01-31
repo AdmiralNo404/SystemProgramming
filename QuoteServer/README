@@ -1,0 +1,87 @@
+/***********************************************************************************************
+ CSci 4061 Spring 2013
+ Assignment# 5: TCP/IP Programming and Multithreaded applications
+
+ Student name: Xiaobin Lin
+ Student ID:   4508516
+
+ Student name: Yanbang Liu  
+ Student ID:   4446044  
+
+ X500 id: linxx966, liux1366
+
+ Operating system on which you tested your code: Linux, Unix, Solaris, MacOS
+ CSELABS machine: <machine you tested on eg: xyz.cselabs.umn.edu>
+
+ GROUP INSTRUCTION: Please make ONLY one submission when working in a group.
+***********************************************************************************************/
+
+output executable:
+server
+
+
+TYPEDEF:
+
+typedef struct{
+	int fd;
+	struct sockaddr_storage addr;
+}thread_input;
+
+This struct is used to pass information into a thread.
+
+
+
+
+Function Descriptions:
+
+//Return Time As a String to buffer, whose length is size.
+void get_time(char *buffer, int size);
+
+
+//Write to LOGFILE to indicate start of a new connection
+//ip address is passed in as an argument
+void startConnection(struct sockaddr_storage addr);
+
+
+//Write to LOGFILE to indicate end of a connection
+//ip address is passed in as an argument
+void endConnection(struct sockaddr_storage addr);
+
+
+//Get the file name of a given quote, file name is returned
+//to argument fname.
+//If quote is NULL, then randomly return a file name.
+int getFileName(char* quote,char* fname);
+
+
+//Randomly return a quote to "result",
+//from a given file name "fname".
+int getQuote(char* fname, char* result);
+
+//Return the list of available quotes to
+//"param".
+int getList(char* param);
+
+//Return the number of lines of a given file.
+//If the file doesn't exist, return -1.
+int getLineNum(char* fname);
+
+
+//Return line number of a given file name in the "config.txt" file.
+//If the file doesn't exist, return -1.
+int getQuoteLine(char* quote);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
